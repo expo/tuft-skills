@@ -1,5 +1,6 @@
 {
   "skills": [
-    { "name": "install-xcode", "subdir": "install-xcode" }
+    { "name": "install-xcode", "subdir": "install-xcode" },
+    { "name": "expo-tuft-development", "subdir": "expo-tuft-development" }
   ]
 }
