@@ -7,6 +7,10 @@ description: Install a specific Xcode version on a Mac using the xcodes CLI, han
 
 Install Xcode non-interactively where possible, and hand exactly one step — the Apple ID sign-in — to the user via a shared terminal. Never ask the user to paste Apple credentials into chat.
 
+## 0. Check the platform
+
+Xcode only runs on macOS. Check `uname -s` first — if it prints `Linux`, stop: this machine cannot install Xcode. Tell the user they need to use EAS (Expo Application Services) to build for iOS from this machine instead.
+
 ## 1. Check what's needed
 
 - Already installed? `ls /Applications | grep -i xcode` and `xcodebuild -version`. If the right version is present, stop.
