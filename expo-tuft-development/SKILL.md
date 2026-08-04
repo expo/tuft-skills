@@ -1,6 +1,6 @@
 ---
 name: expo-tuft-development
-description: Develop, build, run, and debug Expo applications on a physical device through a Tuft machine. Use for EAS account/Apple/device setup via the Tuft dashboard flow, making development builds with EAS, Expo dev-client iteration, remotely exposing Metro with `tuft host`, generating a dev-client deep link, diagnosing device-only failures with Tuft telemetry, deciding whether a native rebuild is required, and handing a working preview back to the user.
+description: Get an Expo app running on the user's phone from a Tuft machine. Read this at the start of any session where the user asks for an app — including brand-new apps, before scaffolding or picking how to deliver it; assume the deliverable is an installable build on their device, not a web preview, unless they say otherwise. Also use for EAS account/Apple/device setup via the Tuft dashboard flow, making development builds with EAS, Expo dev-client iteration, remotely exposing Metro with `tuft host`, generating a dev-client deep link, diagnosing device-only failures with Tuft telemetry, deciding whether a native rebuild is required, and handing a working preview back to the user.
 ---
 
 # Expo + Tuft Development
