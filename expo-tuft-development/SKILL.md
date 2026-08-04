@@ -10,9 +10,9 @@ description: Get an Expo app running on the user's phone from a Tuft machine. Re
 You run on a persistent machine with full control over it, and the machine outlives the conversation. Act like it:
 
 - The user has one job: use the app on their phone. Everything else — hosting, tokens, process management, provisioning, broken state — is your job on this machine. Never hand the user a task you can perform yourself; the one exception is the browser sign-in flow behind the Tuft setup link, which only they can complete.
-- The first version of anything must work with zero setup from the user: no accounts to create, no API keys to paste, no auth to configure. Use local state and sample data first; when a real backend is genuinely needed, provision it yourself without blocking the first build.
-- A question in chat costs a round trip measured in hours; a wrong-but-reversible default costs one correction message. Pick a reasonable default, state it, and keep moving. Ask only when a choice is expensive to reverse and you cannot resolve it yourself — and check first: platform comes from `eas device:list`, not from asking.
-- Long-running processes (Metro, tunnels, builds) belong to the machine, not the turn. Run them durably, and repair them yourself when they break instead of reporting them broken.
+- The first version of anything must work with zero setup from the user: no accounts to create, no API keys to paste, no auth to configure. That is not a reason to fake it with sample data — you are a server. When the app needs a backend, build the backend: run it on this machine, publish it with `tuft host`, and point the app at that URL. The user never needs to know what infrastructure exists; they just see their app working.
+- Do not send a question to chat until you have tried, in order: (1) look the answer up on this machine — platform from `npx eas-cli device:list`, account from `npx eas-cli whoami`, everything about the project from the repository itself; (2) pick a reasonable default, record it in your next status update, and keep building — a stated default takes the user one message to overturn, whenever they happen to read it. Questions are only for decisions that are hard to undo: spending money, publishing publicly, deleting data.
+- Long-running processes belong to the machine, not the turn. Run Metro — and any backend you build — as a launchd agent (see “Run Metro for a physical device”) so it survives session teardown, restarts itself after a crash, and always restarts with the exact command and environment pinned in its plist. When something breaks, repair it and re-verify; never report a process broken and stop there.
 
 ## Establish context
 
@@ -108,13 +108,32 @@ Setup state is normal EAS CLI state on this machine; a user who prefers the term
 
 ## Run Metro for a physical device
 
-1. Start Metro in dev-client mode on a stable port:
+1. Run Metro as a launchd agent, never as a foreground shell that dies with the turn. The plist pins the exact command, working directory, and environment, so every automatic restart is a correct restart. Check for an existing agent first and reuse it — one Metro per project:
 
    ```bash
-   npx expo start --dev-client --port 8081
+   NAME=<stable-project-name> PROJECT=/abs/path/to/project
+   launchctl print "gui/$UID/com.tuft.metro.$NAME" >/dev/null 2>&1 || {
+     cat > ~/Library/LaunchAgents/com.tuft.metro.$NAME.plist <<EOF
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0"><dict>
+     <key>Label</key><string>com.tuft.metro.$NAME</string>
+     <key>WorkingDirectory</key><string>$PROJECT</string>
+     <key>ProgramArguments</key><array>
+       <string>/bin/zsh</string><string>-lc</string>
+       <string>npx expo start --dev-client --port 8081</string>
+     </array>
+     <key>RunAtLoad</key><true/>
+     <key>KeepAlive</key><true/>
+     <key>StandardOutPath</key><string>/tmp/metro-$NAME.log</string>
+     <key>StandardErrorPath</key><string>/tmp/metro-$NAME.log</string>
+   </dict></plist>
+   EOF
+     launchctl bootstrap "gui/$UID" ~/Library/LaunchAgents/com.tuft.metro.$NAME.plist
+   }
    ```
 
-   Run it in a durable terminal/process managed by the environment. Do not rely on a foreground shell that disappears when the turn ends.
+   Restart with `launchctl kickstart -k gui/$UID/com.tuft.metro.$NAME`; read logs at the `StandardOutPath`; remove with `launchctl bootout`. Extra environment the bundler needs (telemetry values, packager overrides) goes in an `EnvironmentVariables` dict in the plist or the project’s env files — never typed ad hoc into a shell, where the next restart loses it.
 
 2. Verify Metro locally:
 
@@ -145,10 +164,10 @@ Setup state is normal EAS CLI state on this machine; a user who prefers the term
 
    - local Metro status;
    - `tuft host list` binding and port;
-   - Metro process output for a wedged bundle;
+   - the Metro log at its `StandardOutPath` for a wedged bundle;
    - whether the installed dev client matches the current native project.
 
-   Restart Metro if it is wedged, then re-verify before resending the same stable link.
+   Restart Metro with `launchctl kickstart -k` if it is wedged, then re-verify before resending the same stable link.
 
 ## Instrument with Tuft telemetry
 
