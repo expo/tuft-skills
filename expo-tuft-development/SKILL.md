@@ -1,9 +1,18 @@
 ---
 name: expo-tuft-development
-description: Get an Expo app running on the user's phone from a Tuft machine. Read this at the start of any session where the user asks for an app — including brand-new apps, before scaffolding or picking how to deliver it; assume the deliverable is an installable build on their device, not a web preview, unless they say otherwise. Also use for EAS account/Apple/device setup via the Tuft dashboard flow, making development builds with EAS, Expo dev-client iteration, remotely exposing Metro with `tuft host`, generating a dev-client deep link, diagnosing device-only failures with Tuft telemetry, deciding whether a native rebuild is required, and handing a working preview back to the user.
+description: Get an Expo app running on the user's phone from a Tuft machine. Read this at the start of any session where the user asks for an app — including brand-new apps, before scaffolding or picking how to deliver it; assume the deliverable is an installable build on their device, not a web preview, unless they say otherwise, and start that build before feature work so it lands mid-session. Also use for EAS account/Apple/device setup via the Tuft dashboard flow, making development builds with EAS, Expo dev-client iteration, remotely exposing Metro with `tuft host`, generating a dev-client deep link, diagnosing device-only failures with Tuft telemetry, deciding whether a native rebuild is required, and handing a working preview back to the user.
 ---
 
 # Expo + Tuft Development
+
+## You are the server
+
+You run on a persistent machine with full control over it, and the machine outlives the conversation. Act like it:
+
+- The user has one job: use the app on their phone. Everything else — hosting, tokens, process management, provisioning, broken state — is your job on this machine. Never hand the user a task you can perform yourself; the one exception is the browser sign-in flow behind the Tuft setup link, which only they can complete.
+- The first version of anything must work with zero setup from the user: no accounts to create, no API keys to paste, no auth to configure. Use local state and sample data first; when a real backend is genuinely needed, provision it yourself without blocking the first build.
+- A question in chat costs a round trip measured in hours; a wrong-but-reversible default costs one correction message. Pick a reasonable default, state it, and keep moving. Ask only when a choice is expensive to reverse and you cannot resolve it yourself — and check first: platform comes from `eas device:list`, not from asking.
+- Long-running processes (Metro, tunnels, builds) belong to the machine, not the turn. Run them durably, and repair them yourself when they break instead of reporting them broken.
 
 ## Establish context
 
@@ -13,10 +22,22 @@ description: Get an Expo app running on the user's phone from a Tuft machine. Re
 4. Preserve unrelated user changes. Use the project’s existing package manager.
 5. Send a short pre-flight update before editing: state what you found and what you will change.
 
+## Start the native build immediately
+
+Native development builds are the primary means of distribution. The deliverable is an installed app on the user's phone; a web preview or Expo Go link is at most a labeled interim — "here's a preview while the iPhone build finishes" — never "the build."
+
+Builds run on EAS servers and take roughly 10–20 minutes, so sequence a session to hide that latency behind your own work instead of adding it after:
+
+1. At session start, run `npx eas-cli whoami` and `npx eas-cli device:list`. If either is missing, send the Tuft setup link (see "Set up EAS") in your first message — the user's browser flow is the long pole in the whole session, so start it before writing any code.
+2. Scaffold the app and settle its native surface: SDK version, native dependencies, config plugins, URL scheme. Do not wait for features — a development build only encodes the native project; JavaScript loads from Metro afterward, so building early never ships a stale app.
+3. Kick off `eas build --profile development --platform ios` (platform from `device:list`, not from asking) in the background the moment the native surface is settled.
+4. Build features over Metro while the EAS build runs. When the build lands mid-session, send the install link immediately rather than saving it for the final summary.
+5. From then on, rebuild only for native changes.
+
 ## Choose the iteration path
 
 - Reuse the installed development client for JavaScript, TypeScript, and asset changes that do not alter the native project.
-- Make a new development build (see “Make a development build”) when no dev client is installed yet, or after adding or changing native dependencies, config plugins, entitlements, URL schemes, capabilities, or native configuration.
+- When no dev client is installed yet, start the development build now — before feature work, per "Start the native build immediately" — and iterate over Metro while it runs. Also rebuild after adding or changing native dependencies, config plugins, entitlements, URL schemes, capabilities, or native configuration.
 - Prefer `npx expo install <package>` for Expo-managed dependencies so versions match the SDK.
 - Do not rebuild merely to deliver ordinary UI or business-logic changes.
 
@@ -226,6 +247,7 @@ Keep chat updates short:
 
 - Begin with the outcome.
 - Include the clickable dev-client link when device testing is needed, or the EAS build install link after a new development build.
+- If you share a web preview before the native build lands, label it as an interim preview and say where the build stands — never present it as the deliverable.
 - When EAS setup is pending, restate the single setup link and what step the user is on — never a credential request.
 - State which tests passed.
 - Mention whether a new native build is required.
