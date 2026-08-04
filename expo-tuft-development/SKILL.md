@@ -1,24 +1,45 @@
 ---
 name: expo-tuft-development
-description: Develop, build, run, and debug Expo applications on a physical device through a Tuft machine. Use for EAS account/Apple/device setup via the Tuft dashboard flow, making development builds with EAS, Expo dev-client iteration, remotely exposing Metro with `tuft host`, generating a dev-client deep link, diagnosing device-only failures with Tuft telemetry, deciding whether a native rebuild is required, and handing a working preview back to the user.
+description: Get an Expo app running on the user's phone from a Tuft machine. Read this at the start of any session where the user asks for an app — including brand-new apps, before scaffolding or picking how to deliver it; assume the deliverable is an installable build on their device, not a web preview, unless they say otherwise, and start that build before feature work so it lands mid-session. Also use for EAS account/Apple/device setup via the Tuft dashboard flow, making development builds with EAS, Expo dev-client iteration, remotely exposing Metro with `tuft host`, generating a dev-client deep link, diagnosing device-only failures with Tuft telemetry, deciding whether a native rebuild is required, and handing a working preview back to the user.
 ---
 
 # Expo + Tuft Development
 
+## You are the server
+
+You run on a persistent machine with full control over it, and the machine outlives the conversation. Act like it:
+
+- The user has one job: use the app on their phone. Everything else — hosting, tokens, process management, provisioning, broken state — is your job on this machine, and you perform it yourself. The user's single hands-on step is the browser sign-in flow behind the Tuft setup link, which only they can complete.
+- The first version of anything must work with zero setup from the user: no accounts to create, no API keys to paste, no auth to configure. You are a server: when the app needs a backend, build the backend — run it on this machine, publish it with `tuft host`, and point the app at that URL. All the user ever sees is their app working.
+- Answer your own questions before they reach chat, in order: (1) look the answer up on this machine — platform from `eas device:list`, account from `eas whoami`, everything about the project from the repository itself; (2) failing that, pick a reasonable default, record it in your next status update, and keep building — a stated default takes the user one message to overturn, whenever they happen to read it. Save chat questions for decisions that are hard to undo: spending money, publishing publicly, deleting data.
+- Long-running processes belong to the machine, not the turn. Run Metro — and any backend you build — as a launchd agent (see “Run Metro for a physical device”) so it survives session teardown, restarts itself after a crash, and always restarts with the exact command and environment pinned in its plist. When something breaks, repair it, re-verify it, and mention the repair in your next update.
+
 ## Establish context
 
 1. Read the session and repository `AGENTS.md` files before acting.
-2. Locate the Expo project; do not assume the Tuft session root is the repository.
+2. Locate the Expo project — it lives in its own checkout; the Tuft session root is scratch space.
 3. Inspect `package.json`, `app.json`/`app.config.*`, `eas.json`, the lockfile, and the current Git status.
 4. Preserve unrelated user changes. Use the project’s existing package manager.
 5. Send a short pre-flight update before editing: state what you found and what you will change.
 
+## Start the native build immediately
+
+Native development builds are the primary means of distribution. The deliverable is an installed app on the user's phone; a web preview or Expo Go link is an interim, shared with a label like "here's a preview while the iPhone build finishes."
+
+Builds run on EAS servers and take roughly 10–20 minutes, so sequence a session to hide that latency behind your own work instead of adding it after:
+
+1. At session start, run `eas whoami` and `eas device:list`. If either is missing, send the Tuft setup link (see "Set up EAS") in your first message — the user's browser flow is the long pole in the whole session, so start it before writing any code.
+2. Scaffold the app and settle its native surface: SDK version, native dependencies, config plugins, URL scheme. Build from the bare native surface — a development build encodes only the native project, and JavaScript loads from Metro afterward, so a build started now is exactly as current as one started after the features exist.
+3. Kick off `eas build --profile development --platform ios` (platform from `device:list`) in the background the moment the native surface is settled.
+4. Build features over Metro while the EAS build runs. When the build lands mid-session, send the install link the moment it arrives.
+5. From then on, rebuild only for native changes.
+
 ## Choose the iteration path
 
 - Reuse the installed development client for JavaScript, TypeScript, and asset changes that do not alter the native project.
-- Make a new development build (see “Make a development build”) when no dev client is installed yet, or after adding or changing native dependencies, config plugins, entitlements, URL schemes, capabilities, or native configuration.
+- When no dev client is installed yet, start the development build now — before feature work, per "Start the native build immediately" — and iterate over Metro while it runs. Also rebuild after adding or changing native dependencies, config plugins, entitlements, URL schemes, capabilities, or native configuration.
 - Prefer `npx expo install <package>` for Expo-managed dependencies so versions match the SDK.
-- Do not rebuild merely to deliver ordinary UI or business-logic changes.
+- Ship ordinary UI and business-logic changes over Metro alone; the installed client picks them up on reload.
 
 ## Set up EAS on this machine (the user does it in a browser)
 
@@ -27,23 +48,23 @@ Every `eas` command that acts on the user’s account — `eas build`, `eas cred
 1. Check first, non-interactively:
 
    ```bash
-   npx eas-cli whoami
+   eas whoami
    ```
 
    Success prints the account; failure means the machine is not logged in.
 
-2. When it is not logged in, never ask for Expo or Apple credentials in chat, and never run `eas login` or `eas device:create` — they prompt interactively and will hang or fail. Instead send the user the Tuft setup link:
+2. When it is not logged in, sign-in happens in the user's browser — send them the Tuft setup link:
 
    ```text
    https://dash.tuft.dev/expo/setup
    ```
 
-   The flow runs entirely in their browser and walks through three steps against this machine: sign EAS CLI in with their Expo account, connect Apple Developer, and register their iPhone.
+   The flow runs entirely in their browser and walks through three steps against this machine: sign EAS CLI in with their Expo account, connect Apple Developer, and register their iPhone. That page is the only channel for credentials — it keeps secrets out of chat, and it stands in for the interactive commands (`eas login`, `eas device:create`) that would hang this machine's non-interactive shell.
 
 3. Wait for setup in the background instead of blocking the conversation, and bound the wait:
 
    ```bash
-   timeout 300 bash -c 'until npx eas-cli whoami >/dev/null 2>&1; do sleep 10; done'
+   timeout 300 bash -c 'until eas whoami >/dev/null 2>&1; do sleep 10; done'
    ```
 
    Exit 0 means the login landed; exit 124 means the user has not finished — follow up in chat rather than looping forever.
@@ -51,7 +72,7 @@ Every `eas` command that acts on the user’s account — `eas build`, `eas cred
 4. Before a physical-device iOS build, additionally require a registered device:
 
    ```bash
-   npx eas-cli device:list
+   eas device:list
    ```
 
    If it is empty, point the user back at the same setup link — the last step registers their iPhone by UDID.
@@ -79,7 +100,7 @@ Setup state is normal EAS CLI state on this machine; a user who prefers the term
    eas build --profile development --platform ios
    ```
 
-   (Android: `--platform android`.) iOS internal distribution signs against the registered device list and the Apple Developer access from setup; EAS manages certificates and the provisioning profile remotely — do not hand-manage credentials.
+   (Android: `--platform android`.) iOS internal distribution signs against the registered device list and the Apple Developer access from setup; EAS manages certificates and the provisioning profile remotely; leave signing entirely to it.
 
 3. Builds run on EAS servers. Track progress with the build URL the command prints (or `eas build:list`). When it finishes, send the user the build page link — it shows the install QR/link for their iPhone.
 
@@ -87,60 +108,32 @@ Setup state is normal EAS CLI state on this machine; a user who prefers the term
 
 ## Run Metro for a physical device
 
-1. Start Metro in dev-client mode on a stable port:
+1. Run the bundled script — it performs the whole sequence in the right order and verifies every layer:
 
    ```bash
-   npx expo start --dev-client --port 8081
+   scripts/run-metro.sh <project-dir> <stable-project-name>
    ```
 
-   Run it in a durable terminal/process managed by the environment. Do not rely on a foreground shell that disappears when the turn ends.
+   The ordering it encodes: publish the port through `tuft host` first, because Metro embeds `EXPO_PACKAGER_PROXY_URL` in every manifest and bundle URL it serves — the public URL has to exist before Metro starts. It then runs Metro as a launchd agent with that URL pinned in the plist (so it outlives the turn, and every restart — manual or crash — serves public URLs), picks a free port when other projects' Metros share the machine, and verifies local status, public status, and that the served manifest belongs to this project and references the public host. It prints the public URL, the dev-client deep link, the log path, and the restart/stop commands.
 
-2. Verify Metro locally:
+2. Reuse the same name on later turns: the script is idempotent, keeping the existing binding and port and re-verifying the full path. Environment the bundle needs at runtime (telemetry values, `EXPO_PUBLIC_*`) lives in the project’s env files, which Metro reads on every restart.
 
-   ```bash
-   curl -fsS --max-time 5 http://127.0.0.1:8081/status
-   ```
+3. Send the user both links the script prints: the clickable dev-client URL and the plain HTTPS Metro URL.
 
-   Require `packager-status:running`.
-
-3. Publish the port through Tuft:
-
-   ```bash
-   tuft host add 8081 --name <stable-project-name>
-   tuft host list
-   ```
-
-   Reuse the same binding on later turns. Use `--force` only when intentionally repointing a binding you own.
-
-4. Build the dev-client URL from the app scheme and percent-encoded Tuft URL:
-
-   ```text
-   <scheme>://expo-development-client/?url=https%3A%2F%2F<name>.tuft.host
-   ```
-
-   Read the actual scheme from Expo configuration; never invent it. Send both the clickable dev-client URL and the plain HTTPS Metro URL.
-
-5. If the device remains on “Loading from Metro,” check both layers:
-
-   - local Metro status;
-   - `tuft host list` binding and port;
-   - Metro process output for a wedged bundle;
-   - whether the installed dev client matches the current native project.
-
-   Restart Metro if it is wedged, then re-verify before resending the same stable link.
+4. If the device remains on “Loading from Metro,” re-run the script — it restarts Metro and re-verifies every layer, and its first failing check names the broken one. For a wedged bundle, read the log at the path the script printed, then `launchctl kickstart -k` and re-verify before resending the same stable link. If all checks pass and the device still spins, compare the installed dev client against the current native project — a native change since the last build means a rebuild.
 
 ## Instrument with Tuft telemetry
 
-Use telemetry liberally, and instrument up front — not just once a bug appears. Every device build and every feature you touch should already be emitting events, because the payoff is having the evidence in hand the moment the user hits an error: querying an event that already fired beats asking them to reload the app and reproduce the problem after the fact. Instrument new code as you write it, and err on the side of more decision-boundary events (they are small and cheap). Tuft telemetry is a per-machine event store: the app posts small structured events to this machine’s collector, and you query them with SQL.
+Use telemetry liberally, and instrument up front, as you build each feature. Every device build and every feature you touch should already be emitting events, because the payoff is having the evidence in hand the moment the user hits an error: querying an event that already fired beats asking them to reload the app and reproduce the problem after the fact. Instrument new code as you write it, and err on the side of more decision-boundary events (they are small and cheap). Tuft telemetry is a per-machine event store: the app posts small structured events to this machine’s collector, and you query them with SQL.
 
 1. Provision the stream with the `setup_expo_telemetry` MCP tool, passing the project’s absolute path. It creates (or reuses) this machine’s stream for the project and returns the collector URL plus, for a new stream, a write-only token as ready-made `EXPO_PUBLIC_TUFT_TELEMETRY_*` environment values. Pass `rotate: true` only to deliberately revoke and reissue the token.
-2. Put the returned values in an uncommitted env file (for example `.env.local`). Never paste or commit the token — or any password, cookie, authorization code, or session credential.
+2. Put the returned values in an uncommitted env file (for example `.env.local`). That file is the only place the token — like any credential — ever appears.
 3. Install the `tuft-telemetry` npm package and initialize it once near the app root with those env values.
 4. Emit small structured events at decision boundaries. Events carry `kind` (`event` or `marker`), `level`, `name`, optional `route`, `trace_id`/`span_id` for grouping a flow, and a `payload` of attributes:
 
    - screen or auth flow opened;
    - request started/completed/failed;
-   - host and path, but not full sensitive URLs;
+   - host and path rather than full URLs;
    - HTTP status and provider;
    - navigation allowed/blocked;
    - merge or hydration outcome;
@@ -179,7 +172,7 @@ Use telemetry liberally, and instrument up front — not just once a bug appears
 7. On a bug report, query recent telemetry before changing code. Establish the exact failing boundary, then patch it.
 8. Confirm the fix using new telemetry after the user retries when the behavior depends on a physical device or third-party service.
 
-Treat HAR files and telemetry payloads as sensitive. Extract only the minimum fields needed and never reproduce secrets in chat, source code, logs, fixtures, or commits.
+Treat HAR files and telemetry payloads as sensitive: extract only the minimum fields needed, and keep any secrets they contain inside the store they came from.
 
 ## Debug systematically
 
@@ -195,17 +188,17 @@ Follow this loop:
 
 For third-party authentication:
 
-- Complete only after receiving verifiable success data, not merely because navigation changed.
-- Allow required HTTPS challenge and identity-provider pages; avoid brittle host allowlists when the provider uses CAPTCHA or cross-origin dependencies.
+- Treat the flow as complete when verifiable success data arrives — a token, profile, or callback payload; navigation alone is progress, not success.
+- Allow required HTTPS challenge and identity-provider pages, and keep navigation rules permissive enough for CAPTCHA and cross-origin dependencies.
 - Intercept custom callback schemes deliberately.
-- Support cookies as required by the flow, but isolate or clear them when the product requires explicit account switching.
-- Never log raw credentials, access tokens, refresh tokens, cookies, passkeys, or MFA values.
+- Support cookies as required by the flow, and isolate or clear them when the product requires explicit account switching.
+- Log flow outcomes and metadata only; raw credentials, access tokens, refresh tokens, cookies, passkeys, and MFA values stay out of every log.
 
 For map/data-provider work:
 
 - Keep catalog authority, live hydration, and rendering separate.
-- Preserve provider health separately from an individual station’s absence; a failed feed must not create false “station missing” warnings.
-- Log match inputs and outcomes without logging credentials.
+- Preserve provider health separately from an individual station’s absence, so a dead feed reads as “provider down” rather than “station missing.”
+- Log match inputs and outcomes as metadata, with the same secret handling as telemetry.
 - Add fixtures for matching, grouping, availability reconciliation, and unmatched records.
 
 ## Validate proportionally
@@ -218,7 +211,7 @@ npm test
 curl -fsS --max-time 5 http://127.0.0.1:8081/status
 ```
 
-Use the repository’s equivalent scripts when these names differ. Report failures exactly; do not claim unrun checks passed.
+Use the repository’s equivalent scripts when these names differ. Report failures exactly, and report a check as passed only after running it.
 
 ## Hand off
 
@@ -226,9 +219,10 @@ Keep chat updates short:
 
 - Begin with the outcome.
 - Include the clickable dev-client link when device testing is needed, or the EAS build install link after a new development build.
-- When EAS setup is pending, restate the single setup link and what step the user is on — never a credential request.
+- Present the install link as the deliverable; label any earlier web preview as an interim and say where the build stands.
+- When EAS setup is pending, restate the single setup link and the step the user is on.
 - State which tests passed.
 - Mention whether a new native build is required.
 - If waiting for a device retry, say exactly what action to take and watch telemetry for the result.
 
-Do not expose `localhost`, LAN, or `exp.direct` URLs to a remote user when a persistent `tuft host` URL is available.
+Every URL you send must be reachable from the user’s device: for anything served from this machine, that is its persistent `tuft host` URL.
