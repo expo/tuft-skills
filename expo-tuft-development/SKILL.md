@@ -108,66 +108,19 @@ Setup state is normal EAS CLI state on this machine; a user who prefers the term
 
 ## Run Metro for a physical device
 
-1. Run Metro as a launchd agent so it outlives every turn. The plist pins the exact command, working directory, and environment, so every automatic restart is a correct restart. Check for an existing agent first and reuse it — one Metro per project:
+1. Run the bundled script — it performs the whole sequence in the right order and verifies every layer:
 
    ```bash
-   NAME=<stable-project-name> PROJECT=/abs/path/to/project
-   launchctl print "gui/$UID/com.tuft.metro.$NAME" >/dev/null 2>&1 || {
-     cat > ~/Library/LaunchAgents/com.tuft.metro.$NAME.plist <<EOF
-   <?xml version="1.0" encoding="UTF-8"?>
-   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-   <plist version="1.0"><dict>
-     <key>Label</key><string>com.tuft.metro.$NAME</string>
-     <key>WorkingDirectory</key><string>$PROJECT</string>
-     <key>ProgramArguments</key><array>
-       <string>/bin/zsh</string><string>-lc</string>
-       <string>npx expo start --dev-client --port 8081</string>
-     </array>
-     <key>RunAtLoad</key><true/>
-     <key>KeepAlive</key><true/>
-     <key>StandardOutPath</key><string>/tmp/metro-$NAME.log</string>
-     <key>StandardErrorPath</key><string>/tmp/metro-$NAME.log</string>
-   </dict></plist>
-   EOF
-     launchctl bootstrap "gui/$UID" ~/Library/LaunchAgents/com.tuft.metro.$NAME.plist
-   }
+   scripts/run-metro.sh <project-dir> <stable-project-name>
    ```
 
-   Restart with `launchctl kickstart -k gui/$UID/com.tuft.metro.$NAME`; read logs at the `StandardOutPath`; remove with `launchctl bootout`. Extra environment the bundler needs (telemetry values, packager overrides) goes in an `EnvironmentVariables` dict in the plist or the project’s env files, so every restart carries it.
+   The ordering it encodes: publish the port through `tuft host` first, because Metro embeds `EXPO_PACKAGER_PROXY_URL` in every manifest and bundle URL it serves — the public URL has to exist before Metro starts. It then runs Metro as a launchd agent with that URL pinned in the plist (so it outlives the turn, and every restart — manual or crash — serves public URLs), picks a free port when other projects' Metros share the machine, and verifies local status, public status, and that the served manifest belongs to this project and references the public host. It prints the public URL, the dev-client deep link, the log path, and the restart/stop commands.
 
-2. Verify Metro locally:
+2. Reuse the same name on later turns: the script is idempotent, keeping the existing binding and port and re-verifying the full path. Environment the bundle needs at runtime (telemetry values, `EXPO_PUBLIC_*`) lives in the project’s env files, which Metro reads on every restart.
 
-   ```bash
-   curl -fsS --max-time 5 http://127.0.0.1:8081/status
-   ```
+3. Send the user both links the script prints: the clickable dev-client URL and the plain HTTPS Metro URL.
 
-   Require `packager-status:running`.
-
-3. Publish the port through Tuft:
-
-   ```bash
-   tuft host add 8081 --name <stable-project-name>
-   tuft host list
-   ```
-
-   Reuse the same binding on later turns. Use `--force` only when intentionally repointing a binding you own.
-
-4. Build the dev-client URL from the app scheme and percent-encoded Tuft URL:
-
-   ```text
-   <scheme>://expo-development-client/?url=https%3A%2F%2F<name>.tuft.host
-   ```
-
-   Read the actual scheme from `app.json`/`app.config.*`. Send both the clickable dev-client URL and the plain HTTPS Metro URL.
-
-5. If the device remains on “Loading from Metro,” check both layers:
-
-   - local Metro status;
-   - `tuft host list` binding and port;
-   - the Metro log at its `StandardOutPath` for a wedged bundle;
-   - whether the installed dev client matches the current native project.
-
-   Restart Metro with `launchctl kickstart -k` if it is wedged, then re-verify before resending the same stable link.
+4. If the device remains on “Loading from Metro,” re-run the script — it restarts Metro and re-verifies every layer, and its first failing check names the broken one. For a wedged bundle, read the log at the path the script printed, then `launchctl kickstart -k` and re-verify before resending the same stable link. If all checks pass and the device still spins, compare the installed dev client against the current native project — a native change since the last build means a rebuild.
 
 ## Instrument with Tuft telemetry
 
