@@ -83,13 +83,14 @@ Each native change costs another full EAS build, so decide the native surface up
    }
    ```
 
-2. Start the build — it runs on EAS servers, not this machine:
+2. Link the project and start the build without prompts — on a project not yet linked to EAS, a bare `eas build` stops to ask which account should own the project, which hangs this machine's non-interactive shell:
 
    ```bash
-   eas build --profile development --platform ios
+   eas init --account "$(eas whoami)" --non-interactive
+   eas build --profile development --platform ios --non-interactive --no-wait
    ```
 
-   (Platform from `eas device:list`.) Internal distribution signs against the registered device list; EAS manages certificates and provisioning remotely — leave signing entirely to it.
+   (Platform from `eas device:list`; pass a different `--account` only when the project belongs to an org.) The build runs on EAS servers, not this machine; `--no-wait` returns immediately so you can keep working. Internal distribution signs against the registered device list; EAS manages certificates and provisioning remotely — leave signing entirely to it. If the non-interactive build fails on missing credentials, the Tuft setup flow hasn't finished its Apple Developer step — send the setup link again rather than retrying interactively.
 
 3. **While the build runs, write the JS/UI.** The build takes 10–20 minutes; that is your window to implement the feature, get Metro up (section 4), and have everything ready the moment the client installs.
 
